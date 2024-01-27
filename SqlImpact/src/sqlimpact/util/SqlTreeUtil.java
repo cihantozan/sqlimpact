@@ -379,7 +379,8 @@ public class SqlTreeUtil {
 	}
 	
 	public void parse(String sql, String connectionSchema, DBUtil dbUtil) throws JSQLParserException {
-		sql=sql.toUpperCase();		
+		sql=sql.toUpperCase();
+		connectionSchema=connectionSchema.toUpperCase();
 		Statement st=CCJSqlParserUtil.parse(sql);
 		
 		SqlTreeCreator s=new SqlTreeCreator();
