@@ -8,6 +8,7 @@ public class SqlTree {
 	private SqlTree parent;
 	private List<SqlTree> childList;	
 	private Object data;
+	private Object extraData;
 	
 	private SqlTreeListener sqlTreeListener; 
 	
@@ -34,8 +35,13 @@ public class SqlTree {
 	}
 	public void setSqlTreeListener(SqlTreeListener sqlTreeListener) {
 		this.sqlTreeListener = sqlTreeListener;
+	}	
+	public Object getExtraData() {
+		return extraData;
 	}
-	
+	public void setExtraData(Object extraData) {
+		this.extraData = extraData;
+	}
 	
 	public SqlTree() {		
 	}

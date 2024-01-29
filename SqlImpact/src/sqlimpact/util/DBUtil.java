@@ -82,7 +82,7 @@ public class DBUtil {
 	public void getMetadataFromFile(String fileName) throws FileNotFoundException {
 		tableList=new TableList();
 		Scanner scanner = new Scanner(new File(fileName),"windows-1254");
-		//scanner.useDelimiter(";");
+		scanner.useDelimiter("\r\n");
 		String rowStr;
 		String[] columns;
 		while(scanner.hasNext()) {

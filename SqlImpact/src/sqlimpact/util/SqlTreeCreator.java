@@ -175,6 +175,7 @@ import net.sf.jsqlparser.statement.show.ShowIndexStatement;
 import net.sf.jsqlparser.statement.show.ShowTablesStatement;
 import net.sf.jsqlparser.statement.truncate.Truncate;
 import net.sf.jsqlparser.statement.update.Update;
+import net.sf.jsqlparser.statement.update.UpdateSet;
 import net.sf.jsqlparser.statement.upsert.Upsert;
 
 /**
@@ -408,6 +409,8 @@ public class SqlTreeCreator implements SelectVisitor, FromItemVisitor, Expressio
      * @param table
      * @return
      */
+    
+    
     
 
     @Override
@@ -1212,6 +1215,18 @@ public class SqlTreeCreator implements SelectVisitor, FromItemVisitor, Expressio
         visit(update.getTable());
         
         
+        if(update.getUpdateSets()!=null) {
+        	currentNode=updateNode.addChild("UPDATE_SET");
+        	
+        	for(UpdateSet updateSet:update.getUpdateSets()) {
+        		if(updateSet.getColumns()!=null) {
+        			for(Column column : updateSet.getColumns()) {
+        				column.accept(this);
+        			}
+        		}
+        	}
+        }
+        
         if (update.getWithItemsList() != null) {
         	
         	currentNode=updateNode.addChild("WITH_ITEM_LIST");
@@ -1538,9 +1553,27 @@ public class SqlTreeCreator implements SelectVisitor, FromItemVisitor, Expressio
     @Override
     public void visit(ParenthesedFromItem parenthesis) {
      	SqlTree backupCurrentNode=currentNode;    	
-    	currentNode=backupCurrentNode.addChild(parenthesis);    	
+    	currentNode=backupCurrentNode.addChild(parenthesis);  
+    	SqlTree joinListNode=currentNode;
     	
         parenthesis.getFromItem().accept(this);
+        
+        for(Join join : parenthesis.getJoins()) {
+            
+        	currentNode=joinListNode.addChild("JOIN");
+        	SqlTree joinNode=currentNode;
+        	
+            join.getFromItem().accept(this);
+            //join.getRightItem().accept(this);
+            
+            currentNode=joinNode.addChild("JOIN_ON_EXP");
+            
+            for (Expression expression : join.getOnExpressions()) {
+                expression.accept(this);
+            }
+            
+            currentNode=joinListNode;
+        }
         
     	currentNode=backupCurrentNode;
     }

@@ -12,14 +12,19 @@ import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.Statement;
+import net.sf.jsqlparser.statement.delete.Delete;
+import net.sf.jsqlparser.statement.insert.Insert;
+import net.sf.jsqlparser.statement.merge.Merge;
 import net.sf.jsqlparser.statement.select.AllColumns;
 import net.sf.jsqlparser.statement.select.AllTableColumns;
 import net.sf.jsqlparser.statement.select.FromItem;
 import net.sf.jsqlparser.statement.select.Join;
+import net.sf.jsqlparser.statement.select.ParenthesedFromItem;
 import net.sf.jsqlparser.statement.select.ParenthesedSelect;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.SelectItem;
 import net.sf.jsqlparser.statement.select.WithItem;
+import net.sf.jsqlparser.statement.update.Update;
 
 public class SqlTreeUtil {
 	
@@ -59,13 +64,56 @@ public class SqlTreeUtil {
 		}
 		return null;
 	}
+	public List<FromItem> getFromList(ParenthesedFromItem parenthesedFromItem){
+		List<FromItem> list=new ArrayList<FromItem>();
+		if(parenthesedFromItem.getFromItem() instanceof ParenthesedFromItem) {
+			List<FromItem> list2=getFromList((ParenthesedFromItem)parenthesedFromItem.getFromItem());
+			list.addAll(list2);
+		}
+		else {
+			list.add(parenthesedFromItem.getFromItem());
+		}
+		
+		if(parenthesedFromItem.getJoins()!=null) {
+			for(Join join : parenthesedFromItem.getJoins()) {
+				if(join.getFromItem() instanceof ParenthesedFromItem) {
+					List<FromItem> list2=getFromList((ParenthesedFromItem)join.getFromItem());
+					list.addAll(list2);
+				}
+				else {
+					list.add(join.getFromItem());
+				}
+			}
+		}
+		return list;
+	}
 	public List<FromItem> getFromList(PlainSelect select){
+		/*
 		List<FromItem> list=new ArrayList<FromItem>();
 		list.add(select.getFromItem());
 		
 		if(select.getJoins()!=null) {
 			for(Join join:select.getJoins()) {
 				list.add(join.getFromItem());
+			}
+		}
+		return list;
+		*/
+		
+		List<FromItem> list=new ArrayList<FromItem>();
+		if(select.getFromItem() instanceof ParenthesedFromItem) {
+			List<FromItem> list2=getFromList((ParenthesedFromItem)select.getFromItem());
+			list.addAll(list2);
+		}
+		else list.add(select.getFromItem());
+		
+		if(select.getJoins()!=null) {
+			for(Join join:select.getJoins()) {
+				if(join.getFromItem() instanceof ParenthesedFromItem) {
+					List<FromItem> list2=getFromList((ParenthesedFromItem)join.getFromItem());
+					list.addAll(list2);					
+				}
+				else list.add(join.getFromItem());
 			}
 		}
 		return list;
@@ -91,17 +139,7 @@ public class SqlTreeUtil {
 		if(node.getParent()!=null) return findSelectOfTableInWithQuery(table, node.getParent());
 		else return null;
 	}
-	public SqlTree findSelect(SqlTree node) {
 		
-		if(node.getData() instanceof PlainSelect) {
-			return node;
-		}
-		else {			
-			if(node.getParent()!=null) return findSelect(node.getParent());
-		}
-		return null;
-	}
-	
 	private List<Column> getAllColumnsofStar(SqlTree starNode) {
 		String alias=null;
 		if(starNode.getData() instanceof AllTableColumns && ((AllTableColumns)starNode.getData()).getTable()!=null) {
@@ -131,13 +169,15 @@ public class SqlTreeUtil {
 				//gerçek tablo ise
 				if((fromItem instanceof Table) && withQueryOfTable==null) {					
 					DBUtil.Table table = tables.get(((Table)fromItem));
-					HashSet<String> columnList = table.getColumnList();
-															
-					for(String columnName:columnList) {						
-						Column column=new Column(((Table)fromItem),columnName);
-						starColumnList.add(column);
-					}					
-				}
+					if(table!=null) {
+						HashSet<String> columnList = table.getColumnList();
+																
+						for(String columnName:columnList) {						
+							Column column=new Column(((Table)fromItem),columnName);
+							starColumnList.add(column);
+						}				
+					}
+				}				
 				//subquery veya with query ise
 				else {
 					
@@ -173,7 +213,43 @@ public class SqlTreeUtil {
 		}
 		return starColumnList;		
 	}
-	private ColumnProperties getTableOfColumn(SqlTree columnNode,SqlTree selectNode,List<SqlTree> visitedSelectNodes) {
+	private SqlTree getParentStatementType(SqlTree columnNode,SqlTree currentNode) {
+		if(currentNode==null) currentNode=columnNode.getParent();
+		if(currentNode!=null) {
+			if(
+				       currentNode.getData() instanceof PlainSelect
+				    || currentNode.getData() instanceof Update
+				    || currentNode.getData() instanceof Delete
+				    || currentNode.getData() instanceof Merge
+			) {
+				return currentNode;
+			}
+			else {
+				return getParentStatementType(columnNode,currentNode.getParent());
+			}
+		}
+		else {
+			return null;
+		}
+	}
+	private ColumnProperties getTableOfColumn(SqlTree columnNode) {
+		SqlTree parentStatementType=getParentStatementType(columnNode,null);
+		if(parentStatementType.getData() instanceof PlainSelect) return getTableOfColumnFromSelect(columnNode, null, null);
+		else if(parentStatementType.getData() instanceof Update) return getTableOfColumnFromUpdate(columnNode,parentStatementType);
+		 
+		
+		return null;
+	}
+	private ColumnProperties getTableOfColumnFromUpdate(SqlTree columnNode,SqlTree updateNode) {
+		Update update=(Update)updateNode.getData();
+		DBUtil.Table table=this.tables.get((Table)update.getTable());
+		if(table.columnContains(((Column)columnNode.getData()).getColumnName())){
+			return new ColumnProperties(((Column)columnNode.getData()).getColumnName(), table);
+		}
+		return null;
+
+	}
+	private ColumnProperties getTableOfColumnFromSelect(SqlTree columnNode,SqlTree selectNode,List<SqlTree> visitedSelectNodes) {
 		
 		if(this.columnsTables.containsKey(columnNode)) return this.columnsTables.get(columnNode);
 		
@@ -224,7 +300,7 @@ public class SqlTreeUtil {
 					else subQuery=withQueryOfTable;
 					
 					Column foundColumn =  findColumnInSelect(column.getColumnName(), subQuery);
-					if(foundColumn!=null) return getTableOfColumn(this.allNodes.get(foundColumn), this.allNodes.get(subQuery),visitedSelectNodes);
+					if(foundColumn!=null) return getTableOfColumnFromSelect(this.allNodes.get(foundColumn), this.allNodes.get(subQuery),visitedSelectNodes);
 				}								
 			}			
 		}
@@ -233,10 +309,17 @@ public class SqlTreeUtil {
 		//Node parent = select.getASTNode().jjtGetParent();		
 		SqlTree parent=selectNode.getParent();		
 		if(parent!=null) {
-			SqlTree parentSelectNode= findSelect(parent);
-			if(parentSelectNode!=null) {
-				return getTableOfColumn(columnNode, parentSelectNode,visitedSelectNodes);
+			
+			SqlTree parentType=getParentStatementType(parent,null);
+			if(parentType.getData() instanceof Update) return getTableOfColumnFromUpdate(columnNode, parentType);			
+			else {
+				SqlTree parentSelectNode= getPlainSelectOfNode(parent);
+				if(parentSelectNode!=null) {
+					return getTableOfColumnFromSelect(columnNode, parentSelectNode,visitedSelectNodes);
+				}	
 			}
+			
+			
 		}		
 		return null;
 		
@@ -258,20 +341,6 @@ public class SqlTreeUtil {
 		return null;
 	}
 	private ColumnLocation getColumnLocation(SqlTree columnNode,SqlTree currentNode, BinaryExpression binaryExpression) {
-		/*
-		 select
-		 from
-		 join
-		 where
-		 group by
-		 having
-		 order by
-		 update
-		 merge
-		 delete
-		 insert
-		 */
-		
 		
 		if(currentNode==null) {
 			if(columnNode.getParent()!=null) currentNode=columnNode.getParent();
@@ -289,6 +358,11 @@ public class SqlTreeUtil {
 		else if(currentNode.getData().equals("HAVING")) location="HAVING";
 		else if(currentNode.getData().equals("HIERARCHICAL")) location="HIERARCHICAL";
 		else if(currentNode.getData().equals("ORDER_BY")) location="ORDER_BY";
+		else if(currentNode.getData().equals("GROUP_BY")) location="GROUP_BY"; // TODO kontrol et
+		else if(currentNode.getData() instanceof Update) location="UPDATE";
+		else if(currentNode.getData() instanceof Delete) location="Delete";
+		else if(currentNode.getData() instanceof Merge) location="Merge";
+		else if(currentNode.getData() instanceof Insert) location="Insert";
 		else if(currentNode.getParent()!=null) return getColumnLocation(columnNode,currentNode.getParent(),binaryExpression);
 		
 		return new ColumnLocation(location, binaryExpression);		
@@ -329,11 +403,13 @@ public class SqlTreeUtil {
 						if(k==0) {
 							selectItemList.set(i, newSelectItem);
 							node.setData(columnList.get(k));
+							node.setExtraData("*");
 							this.allNodes.put(columnList.get(k), node);
 						}
 						else {
 							selectItemList.add(i+k, newSelectItem);
 							SqlTree newColumnNode = node.getParent().addChild(columnList.get(k));
+							newColumnNode.setExtraData("*");
 							this.columns.add(newColumnNode);
 							this.allNodes.put(newColumnNode.getData(), newColumnNode);	
 						}						
@@ -348,9 +424,11 @@ public class SqlTreeUtil {
 		this.columnsTables=new HashMap<SqlTree, SqlTreeUtil.ColumnProperties>();
 		this.columnLocations=new HashMap<SqlTree, SqlTreeUtil.ColumnLocation>();
 		
-		for(SqlTree columnNode:this.columns) {								
-			ColumnProperties columnProperties=getTableOfColumn(columnNode,null,null);
-			this.columnsTables.putIfAbsent(columnNode, columnProperties);
+		for(SqlTree columnNode:this.columns) {
+			if(!(columnNode.getData() instanceof AllColumns)) {
+				ColumnProperties columnProperties=getTableOfColumn(columnNode);
+				this.columnsTables.putIfAbsent(columnNode, columnProperties);
+			}
 			
 			ColumnLocation location=getColumnLocation(columnNode, null, null);			
 			this.columnLocations.putIfAbsent(columnNode, location);			
@@ -362,7 +440,7 @@ public class SqlTreeUtil {
 			ColumnLocation location=this.columnLocations.get(columnNode);
 			ColumnProperties columnProperties = this.columnsTables.get(columnNode);
 			if(columnProperties!=null) {
-				FullColumnImpact impact=new FullColumnImpact(columnProperties.getColumnName(), columnProperties.getTable().getRealOwnerName(), columnProperties.getTable().getRealTableName(), location.getLocation(), location.binaryExpressionToString());
+				FullColumnImpact impact=new FullColumnImpact(columnProperties.getColumnName(), columnProperties.getTable()==null ? null : columnProperties.getTable().getRealOwnerName(), columnProperties.getTable()==null ? null :  columnProperties.getTable().getRealTableName(), location.getLocation(), location.binaryExpressionToString(), columnNode.getExtraData()==null ? null : columnNode.getExtraData().toString());
 				this.fullColumnImpactList.add(impact);
 			}
 			else {
@@ -437,6 +515,8 @@ public class SqlTreeUtil {
 		private String tableName;
 		private String location;
 		private String binaryExpression;
+		private String extraData;
+		
 		public String getColumnName() {
 			return columnName;
 		}
@@ -466,15 +546,23 @@ public class SqlTreeUtil {
 		}
 		public void setBinaryExpression(String binaryExpression) {
 			this.binaryExpression = binaryExpression;
+		}			
+		public String getExtraData() {
+			return extraData;
 		}
+		public void setExtraData(String extraData) {
+			this.extraData = extraData;
+		}
+		
 		public FullColumnImpact(String columnName, String tableOwner, String tableName, String location,
-				String binaryExpression) {
+				String binaryExpression, String extraData) {
 			super();
 			this.columnName = columnName;
 			this.tableOwner = tableOwner;
 			this.tableName = tableName;
 			this.location = location;
 			this.binaryExpression = binaryExpression;
+			this.extraData = extraData;
 		}
 		@Override
 		public int hashCode() {			
@@ -499,8 +587,10 @@ public class SqlTreeUtil {
 		@Override
 		public String toString() {
 			return "FullColumnImpact [columnName=" + columnName + ", tableOwner=" + tableOwner + ", tableName="
-					+ tableName + ", location=" + location + ", binaryExpression=" + binaryExpression + "]";
+					+ tableName + ", location=" + location + ", binaryExpression=" + binaryExpression + ", extraData="
+					+ extraData + "]";
 		}
+		
 		
 		
 		
