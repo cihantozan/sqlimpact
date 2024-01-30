@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import net.sf.jsqlparser.JSQLParserException;
+import net.sf.jsqlparser.expression.Alias;
 import net.sf.jsqlparser.expression.AllValue;
 import net.sf.jsqlparser.expression.AnalyticExpression;
 import net.sf.jsqlparser.expression.AnyComparisonExpression;
@@ -155,6 +156,7 @@ import net.sf.jsqlparser.statement.merge.Merge;
 import net.sf.jsqlparser.statement.refresh.RefreshMaterializedViewStatement;
 import net.sf.jsqlparser.statement.select.AllColumns;
 import net.sf.jsqlparser.statement.select.AllTableColumns;
+import net.sf.jsqlparser.statement.select.FromItem;
 import net.sf.jsqlparser.statement.select.FromItemVisitor;
 import net.sf.jsqlparser.statement.select.Join;
 import net.sf.jsqlparser.statement.select.LateralSubSelect;
@@ -177,6 +179,7 @@ import net.sf.jsqlparser.statement.truncate.Truncate;
 import net.sf.jsqlparser.statement.update.Update;
 import net.sf.jsqlparser.statement.update.UpdateSet;
 import net.sf.jsqlparser.statement.upsert.Upsert;
+import sqlimpact.util.DBUtil.View;
 
 /**
  * Find all used tables within an select statement.
@@ -194,6 +197,8 @@ public class SqlTreeCreator implements SelectVisitor, FromItemVisitor, Expressio
     private SqlTree currentNode;
     private List<SqlTree> tables;
     private List<SqlTree> columns;
+    private DBUtil dbUtil;
+    private String connectionSchema;
     
     
     
@@ -214,6 +219,21 @@ public class SqlTreeCreator implements SelectVisitor, FromItemVisitor, Expressio
 	}
 	
 	
+	
+	public DBUtil getDbUtil() {
+		return dbUtil;
+	}
+	public void setDbUtil(DBUtil dbUtil) {
+		this.dbUtil = dbUtil;
+	}
+	
+	
+	public String getConnectionSchema() {
+		return connectionSchema;
+	}
+	public void setConnectionSchema(String connectionSchema) {
+		this.connectionSchema = connectionSchema;
+	}
 	
 	public void createSqlTree(Statement statement) {
 		
@@ -355,8 +375,10 @@ public class SqlTreeCreator implements SelectVisitor, FromItemVisitor, Expressio
         	
             for (Join join : plainSelect.getJoins()) {            	
             	          
-            	currentNode=joinListNode.addChild("JOIN");
+            	currentNode=joinListNode.addChild("JOIN");            	
             	SqlTree joinNode=currentNode;
+            	
+            	currentNode=currentNode.addChild(join);
             	
                 join.getFromItem().accept(this);
                 //join.getRightItem().accept(this);
@@ -415,8 +437,59 @@ public class SqlTreeCreator implements SelectVisitor, FromItemVisitor, Expressio
 
     @Override
     public void visit(Table tableName) {
-    	SqlTree newNode = currentNode.addChild(tableName);
-    	tables.add(newNode);    	
+    	SqlTree backupCurrentNode=currentNode;    	
+    	
+    	SqlTreeUtil util=new SqlTreeUtil();
+    	PlainSelect s=util.findSelectOfTableInWithQuery(tableName, backupCurrentNode);
+    	
+    	if(s==null) {
+    		DBUtil.Table dbTable = dbUtil.searchTable(this.connectionSchema, tableName.getSchemaName(), tableName.getName());
+    		if(dbTable!=null) {
+    			currentNode=backupCurrentNode.addChild(tableName);
+    			tables.add(currentNode);
+    		}
+    		else {
+    			DBUtil.View view = dbUtil.searchView(connectionSchema, tableName.getSchemaName(), tableName.getName());
+    			if(view!=null) {
+    				
+    				Statement st=null;
+    				try {
+						st=CCJSqlParserUtil.parse(view.getSql());
+					} catch (JSQLParserException e) {
+						System.out.println("parse error");
+					}
+    				if(st!=null) {
+    					Select select = ((CreateView)st).getSelect();
+    					
+    					ParenthesedSelect parenthesedSelect=new ParenthesedSelect();
+    					parenthesedSelect.setSelect(select);
+    					parenthesedSelect.setAlias(new Alias(tableName.getName()));
+    					
+    					
+    					
+    					if (currentNode.getData() instanceof ParenthesedFromItem) {
+    						((ParenthesedFromItem)currentNode.getData()).setFromItem(parenthesedSelect);    						
+    					}
+    					else if(currentNode.getData() instanceof Join) {
+    						((Join)currentNode.getData()).setFromItem(parenthesedSelect);
+    					}
+    					else if(currentNode.getData() instanceof PlainSelect) {
+    						((PlainSelect)currentNode.getData()).setFromItem(parenthesedSelect);
+    					}
+    					    					
+    					currentNode=currentNode.addChild("SUBSELECT");
+    					parenthesedSelect.accept((SelectVisitor) this);
+    					
+
+    					
+    				}
+    				
+    			}
+    		}
+    	}
+    	
+    	currentNode=backupCurrentNode;
+    	    	
     }
 
     @Override
@@ -1562,6 +1635,8 @@ public class SqlTreeCreator implements SelectVisitor, FromItemVisitor, Expressio
             
         	currentNode=joinListNode.addChild("JOIN");
         	SqlTree joinNode=currentNode;
+        	
+        	currentNode=currentNode.addChild(join);
         	
             join.getFromItem().accept(this);
             //join.getRightItem().accept(this);

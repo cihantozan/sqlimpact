@@ -214,6 +214,8 @@ public class SqlTreeUtil {
 		return starColumnList;		
 	}
 	private SqlTree getParentStatementType(SqlTree columnNode,SqlTree currentNode) {
+		
+		
 		if(currentNode==null) currentNode=columnNode.getParent();
 		if(currentNode!=null) {
 			if(
@@ -225,7 +227,8 @@ public class SqlTreeUtil {
 				return currentNode;
 			}
 			else {
-				return getParentStatementType(columnNode,currentNode.getParent());
+				if(currentNode.getParent()==null) return null;
+				else return getParentStatementType(columnNode,currentNode.getParent());
 			}
 		}
 		else {
@@ -311,14 +314,15 @@ public class SqlTreeUtil {
 		if(parent!=null) {
 			
 			SqlTree parentType=getParentStatementType(parent,null);
-			if(parentType.getData() instanceof Update) return getTableOfColumnFromUpdate(columnNode, parentType);			
-			else {
-				SqlTree parentSelectNode= getPlainSelectOfNode(parent);
-				if(parentSelectNode!=null) {
-					return getTableOfColumnFromSelect(columnNode, parentSelectNode,visitedSelectNodes);
-				}	
+			if(parentType!=null) {
+				if(parentType.getData() instanceof Update) return getTableOfColumnFromUpdate(columnNode, parentType);			
+				else {
+					SqlTree parentSelectNode= getPlainSelectOfNode(parent);
+					if(parentSelectNode!=null) {
+						return getTableOfColumnFromSelect(columnNode, parentSelectNode,visitedSelectNodes);
+					}	
+				}
 			}
-			
 			
 		}		
 		return null;
@@ -424,7 +428,7 @@ public class SqlTreeUtil {
 		this.columnsTables=new HashMap<SqlTree, SqlTreeUtil.ColumnProperties>();
 		this.columnLocations=new HashMap<SqlTree, SqlTreeUtil.ColumnLocation>();
 		
-		for(SqlTree columnNode:this.columns) {
+		for(SqlTree columnNode:this.columns) {			
 			if(!(columnNode.getData() instanceof AllColumns)) {
 				ColumnProperties columnProperties=getTableOfColumn(columnNode);
 				this.columnsTables.putIfAbsent(columnNode, columnProperties);
@@ -462,6 +466,8 @@ public class SqlTreeUtil {
 		Statement st=CCJSqlParserUtil.parse(sql);
 		
 		SqlTreeCreator s=new SqlTreeCreator();
+		s.setConnectionSchema(connectionSchema);
+		s.setDbUtil(dbUtil);
 		s.createSqlTree(st);
 		this.allNodes=s.getAllNodes();
 		this.columns=s.getColumns();
