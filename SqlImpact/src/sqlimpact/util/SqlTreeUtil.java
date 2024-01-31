@@ -130,7 +130,8 @@ public class SqlTreeUtil {
 			if(select.getWithItemsList()!=null) {
 				for(WithItem withItem: select.getWithItemsList()) {
 					if(withItem.getAlias().getName().equals(table.getName())) {
-						return withItem.getSelect().getPlainSelect();
+						if(withItem.getSelect() instanceof ParenthesedSelect) return ((ParenthesedSelect)withItem.getSelect()).getPlainSelect();
+						else return withItem.getSelect().getPlainSelect();
 					}
 				}				
 			}			
