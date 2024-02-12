@@ -332,6 +332,11 @@ public class SqlTreeCreator implements SelectVisitor, FromItemVisitor, Expressio
 
     @Override
     public void visit(ParenthesedSelect selectBody) {
+    	
+    	SqlTree backupCurrentNode=currentNode;    	
+    	currentNode=backupCurrentNode.addChild(selectBody);
+    	
+    	
         List<WithItem> withItemsList = selectBody.getWithItemsList();
         if (withItemsList != null && !withItemsList.isEmpty()) {
             for (WithItem withItem : withItemsList) {
@@ -339,6 +344,8 @@ public class SqlTreeCreator implements SelectVisitor, FromItemVisitor, Expressio
             }
         }
         selectBody.getSelect().accept((SelectVisitor) this);
+        
+        currentNode=backupCurrentNode;
     }
 
     @Override
@@ -440,7 +447,7 @@ public class SqlTreeCreator implements SelectVisitor, FromItemVisitor, Expressio
     	SqlTree backupCurrentNode=currentNode;    	
     	
     	SqlTreeUtil util=new SqlTreeUtil();
-    	PlainSelect s=util.findSelectOfTableInWithQuery(tableName, backupCurrentNode);
+    	Select s=util.findSelectOfTableInWithQuery(tableName, backupCurrentNode);
     	
     	if(s==null) {
     		DBUtil.Table dbTable = dbUtil.searchTable(this.connectionSchema, tableName.getSchemaName(), tableName.getName());

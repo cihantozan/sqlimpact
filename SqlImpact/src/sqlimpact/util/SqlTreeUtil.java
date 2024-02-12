@@ -22,7 +22,10 @@ import net.sf.jsqlparser.statement.select.Join;
 import net.sf.jsqlparser.statement.select.ParenthesedFromItem;
 import net.sf.jsqlparser.statement.select.ParenthesedSelect;
 import net.sf.jsqlparser.statement.select.PlainSelect;
+import net.sf.jsqlparser.statement.select.Select;
 import net.sf.jsqlparser.statement.select.SelectItem;
+import net.sf.jsqlparser.statement.select.SetOperation;
+import net.sf.jsqlparser.statement.select.SetOperationList;
 import net.sf.jsqlparser.statement.select.WithItem;
 import net.sf.jsqlparser.statement.update.Update;
 
@@ -118,7 +121,7 @@ public class SqlTreeUtil {
 		}
 		return list;
 	}
-	public PlainSelect findSelectOfTableInWithQuery(Table table, SqlTree node) {
+	public Select findSelectOfTableInWithQuery(Table table, SqlTree node) {
 		
 		if(node==null) {
 			node=this.allNodes.get(table).getParent();
@@ -130,8 +133,9 @@ public class SqlTreeUtil {
 			if(select.getWithItemsList()!=null) {
 				for(WithItem withItem: select.getWithItemsList()) {
 					if(withItem.getAlias().getName().equals(table.getName())) {
-						if(withItem.getSelect() instanceof ParenthesedSelect) return ((ParenthesedSelect)withItem.getSelect()).getPlainSelect();
-						else return withItem.getSelect().getPlainSelect();
+						return withItem.getSelect();
+						//if(withItem.getSelect() instanceof ParenthesedSelect) return ((ParenthesedSelect)withItem.getSelect()).getPlainSelect();
+						//else return withItem.getSelect().getPlainSelect();
 					}
 				}				
 			}			
@@ -139,6 +143,27 @@ public class SqlTreeUtil {
 		
 		if(node.getParent()!=null) return findSelectOfTableInWithQuery(table, node.getParent());
 		else return null;
+	}
+	
+	private List<SqlTree> getFirstColumnListOfSelect(SqlTree selectNode){
+				
+		if(selectNode.getData() instanceof PlainSelect) {
+			List<SqlTree> columnList=new ArrayList<SqlTree>();
+			for(SelectItem selectItem : ((PlainSelect)selectNode.getData()).getSelectItems() ) {				
+				columnList.add(this.allNodes.get(selectItem));
+			}
+			return columnList;
+		}
+		else if(selectNode.getData() instanceof ParenthesedSelect) {
+			List<SqlTree> columnList=getFirstColumnListOfSelect( this.allNodes.get(((ParenthesedSelect)selectNode.getData()).getSelect())  );
+			return columnList;
+		}
+		else if(selectNode.getData() instanceof SetOperationList) {
+			List<SqlTree> columnList=getFirstColumnListOfSelect( this.allNodes.get(((SetOperationList)selectNode.getData()).getSelect(0))  );
+			return columnList;
+		}
+		
+		return null;
 	}
 		
 	private List<Column> getAllColumnsofStar(SqlTree starNode) {
@@ -164,7 +189,7 @@ public class SqlTreeUtil {
 					)
 			  ) {
 			
-				PlainSelect withQueryOfTable=null;
+				Select withQueryOfTable=null;
 				if(fromItem instanceof Table) withQueryOfTable=findSelectOfTableInWithQuery((Table)fromItem, selectNode);
 				
 				//gerçek tablo ise
@@ -181,12 +206,20 @@ public class SqlTreeUtil {
 				}				
 				//subquery veya with query ise
 				else {
+										
 					
-					PlainSelect subQuery=null;					
-					if(withQueryOfTable==null) subQuery=((ParenthesedSelect)fromItem).getPlainSelect();
-					else subQuery=withQueryOfTable;
 					
-					for(SelectItem subSelectItem : subQuery.getSelectItems()) {
+					List<SqlTree> selectItemsTreeList = null;
+					if(withQueryOfTable==null) {
+						selectItemsTreeList = getFirstColumnListOfSelect(this.allNodes.get(fromItem));
+					}
+					else {
+						selectItemsTreeList = getFirstColumnListOfSelect(this.allNodes.get(withQueryOfTable));
+					}
+					
+					for(SqlTree subSelectItemTree : selectItemsTreeList) {
+						SelectItem subSelectItem=(SelectItem)subSelectItemTree.getData();
+						
 						if( subSelectItem.getExpression() instanceof AllColumns ) {
 							SqlTree newStarNode=allNodes.get((AllColumns)subSelectItem.getExpression());
 							List<Column> subSelectStarColumns = getAllColumnsofStar(newStarNode);
@@ -253,6 +286,16 @@ public class SqlTreeUtil {
 		return null;
 
 	}
+	private PlainSelect getPLainSelectOfSelect(Select select) {
+		if(select instanceof PlainSelect) {
+			return (PlainSelect)select;
+		}
+		else if(select instanceof ParenthesedSelect) {
+			return getPLainSelectOfSelect(((ParenthesedSelect) select).getSelect());
+		}
+		
+		return null;
+	}
 	private ColumnProperties getTableOfColumnFromSelect(SqlTree columnNode,SqlTree selectNode,List<SqlTree> visitedSelectNodes) {
 		
 		if(this.columnsTables.containsKey(columnNode)) return this.columnsTables.get(columnNode);
@@ -286,7 +329,7 @@ public class SqlTreeUtil {
 				 || alias==null
 			  ) {
 				
-				PlainSelect withQueryOfTable=null;
+				Select withQueryOfTable=null;
 				if(fromItem instanceof Table) withQueryOfTable=findSelectOfTableInWithQuery((Table)fromItem,null);
 				
 				//gerçek tablo ise
@@ -298,13 +341,22 @@ public class SqlTreeUtil {
 				}
 				//subquery veya with query ise
 				else {
-					PlainSelect subQuery=null;
+					Select subQuery=null;
 					
-					if(withQueryOfTable==null) subQuery=((ParenthesedSelect)fromItem).getPlainSelect();
-					else subQuery=withQueryOfTable;
+					if(withQueryOfTable!=null) subQuery=withQueryOfTable; 											
+					else if(fromItem instanceof ParenthesedSelect) subQuery=((ParenthesedSelect)fromItem).getSelect();						
+					else if(fromItem instanceof SetOperationList) {
+							//bir kolon birden fazla tablodan besleniyorsa boş bırakıldı.
+					}
 					
-					Column foundColumn =  findColumnInSelect(column.getColumnName(), subQuery);
-					if(foundColumn!=null) return getTableOfColumnFromSelect(this.allNodes.get(foundColumn), this.allNodes.get(subQuery),visitedSelectNodes);
+					if(subQuery!=null) {
+						PlainSelect plainSelect = getPLainSelectOfSelect(subQuery);
+						if(plainSelect!=null) {
+							Column foundColumn =  findColumnInSelect(column.getColumnName(), plainSelect);
+							if(foundColumn!=null) return getTableOfColumnFromSelect(this.allNodes.get(foundColumn), this.allNodes.get(subQuery),visitedSelectNodes);
+						}
+					}
+					
 				}								
 			}			
 		}
